@@ -1,116 +1,206 @@
-local player = game.Players.LocalPlayer
-local JUMP_POWER_DEFAULT = 50
-local jumpEnabled = true -- true = pulo liberado
+-- HUNK HUB🫂
+-- Condução • Noclip • AntiLag • Big Chute • Desarme
+-- Client-Side
 
--- Função pra ligar/desligar o pulo
-local function setJumpEnabled(enabled)
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		if enabled then
-			humanoid.JumpPower = JUMP_POWER_DEFAULT
-		else
-			humanoid.JumpPower = 0
-			humanoid.Jump = false
-		end
-	end
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+
+-- ========================
+-- CONFIG
+-- ========================
+local Config = {
+    Active = {
+        NoClip = false,
+        BallControl = false,
+        Disarm = false,
+        Reaction = true,
+        AntiLag = false,
+        BigKick = false
+    },
+    Values = {
+        ReactionTime = 0.25,
+        BallControlDistance = 2.5,
+        BigKickForce = 999999 -- 💀 FORÇA EXTREMA
+    }
+}
+
+-- ========================
+-- CACHE
+-- ========================
+local Char, Root
+local function UpdateChar()
+    Char = LocalPlayer.Character
+    if Char then
+        Root = Char:WaitForChild("HumanoidRootPart")
+    end
+end
+UpdateChar()
+LocalPlayer.CharacterAdded:Connect(UpdateChar)
+
+-- ========================
+-- BOLA
+-- ========================
+local function GetBall()
+    return workspace:FindFirstChild("Ball") or workspace:FindFirstChild("Football")
 end
 
--- Criar o botão flutuante
-local function createFloatingButton()
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "JumpToggleGui"
-	screenGui.ResetOnSpawn = false
-	screenGui.Parent = player:WaitForChild("PlayerGui")
-
-	local button = Instance.new("TextButton")
-	button.Name = "FloatingJumpButton"
-	button.Size = UDim2.new(0, 40, 0, 40)
-	button.Position = UDim2.new(0, 10, 0.5, -20)
-	button.BorderSizePixel = 0
-	button.TextSize = 12
-	button.AutoButtonColor = false
-	button.Parent = screenGui
-	button.ClipsDescendants = true
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(1, 0)
-	corner.Parent = button
-
-	-- Visual
-	local function updateVisual()
-		if jumpEnabled then
-			button.Text = "OFF"
-			button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			button.TextColor3 = Color3.fromRGB(0, 0, 0)
-		else
-			button.Text = "ON"
-			button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-			button.TextColor3 = Color3.fromRGB(255, 140, 0)
-		end
-	end
-
-	----------------------------------------------------------------
-	-- 🔥 DRAG MELHORADO (EXTREMO, SUAVE, PC + MOBILE)
-	----------------------------------------------------------------
-	local UIS = game:GetService("UserInputService")
-	local dragging = false
-	local dragStart
-	local startPos
-	local activeInput
-
-	button.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = button.Position
-			activeInput = input
-		end
-	end)
-
-	button.InputEnded:Connect(function(input)
-		if input == activeInput then
-			dragging = false
-			activeInput = nil
-		end
-	end)
-
-	UIS.InputChanged:Connect(function(input)
-		if dragging and input == activeInput then
-			local delta = input.Position - dragStart
-			button.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
-		end
-	end)
-	----------------------------------------------------------------
-
-	-- Clique
-	button.MouseButton1Click:Connect(function()
-		jumpEnabled = not jumpEnabled
-		setJumpEnabled(jumpEnabled)
-		updateVisual()
-	end)
-
-	-- Respawn
-	player.CharacterAdded:Connect(function()
-		task.wait(0.1)
-		setJumpEnabled(jumpEnabled)
-		updateVisual()
-	end)
-
-	setJumpEnabled(jumpEnabled)
-	updateVisual()
+-- ========================
+-- TEMPO DE REAÇÃO
+-- ========================
+local lastReact = 0
+local function CanReact()
+    if not Config.Active.Reaction then return true end
+    if tick() - lastReact >= Config.Values.ReactionTime then
+        lastReact = tick()
+        return true
+    end
+    return false
 end
 
--- Garantir PlayerGui
-if player:FindFirstChild("PlayerGui") then
-	createFloatingButton()
-else
-	player:WaitForChild("PlayerGui")
-	createFloatingButton()
+-- ========================
+-- NOCLIP (PAREDES)
+-- ========================
+local function TrueNoClip()
+    if not Char then return end
+    for _, v in ipairs(Char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.CanCollide = false
+        end
+    end
 end
+
+-- ========================
+-- NO COLLIDE JOGADORES
+-- ========================
+local function PlayerNoCollide()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            for _, v in ipairs(p.Character:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.CanCollide = false
+                end
+            end
+        end
+    end
+end
+
+-- ========================
+-- CONDUÇÃO DE BOLA
+-- ========================
+local function BallControl()
+    local ball = GetBall()
+    if not ball or not Root then return end
+    ball:SetNetworkOwner(LocalPlayer)
+    ball.CFrame = Root.CFrame * CFrame.new(0, -1, -Config.Values.BallControlDistance)
+    ball.AssemblyLinearVelocity = Vector3.zero
+    ball.AssemblyAngularVelocity = Vector3.zero
+end
+
+-- ========================
+-- DESARMAR
+-- ========================
+local function Disarm()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local tool = p.Character:FindFirstChildOfClass("Tool")
+            if hrp and tool and Root then
+                if (hrp.Position - Root.Position).Magnitude <= 10 then
+                    tool.Parent = p.Backpack
+                end
+            end
+        end
+    end
+end
+
+-- ========================
+-- BIG CHUTE
+-- ========================
+local function BigKick()
+    local ball = GetBall()
+    if not ball or not Root then return end
+    ball:SetNetworkOwner(LocalPlayer)
+    ball.AssemblyLinearVelocity = Root.CFrame.LookVector * Config.Values.BigKickForce
+end
+
+-- ========================
+-- ANTI LAG
+-- ========================
+local function AntiLag()
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 1e9
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+end
+
+-- ========================
+-- LOOP
+-- ========================
+RunService.Heartbeat:Connect(function()
+    if Config.Active.AntiLag then AntiLag() end
+    if not CanReact() then return end
+
+    if Config.Active.NoClip then TrueNoClip() end
+
+    if Config.Active.BallControl then
+        BallControl()
+        PlayerNoCollide()
+    end
+
+    if Config.Active.Disarm then Disarm() end
+
+    if Config.Active.BigKick then
+        BigKick()
+        Config.Active.BigKick = false
+    end
+end)
+
+-- ========================
+-- GUI
+-- ========================
+local gui = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+gui.Name = "HunkPainelHub"
+
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.new(0, 260, 0, 360)
+main.Position = UDim2.new(0.5, -130, 0.5, -180)
+main.BackgroundColor3 = Color3.fromRGB(25,25,30)
+main.Active = true
+main.Draggable = true
+Instance.new("UICorner", main)
+
+local title = Instance.new("TextLabel", main)
+title.Size = UDim2.new(1,0,0,40)
+title.Text = "🫂 Hunk Painel Hub"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.fromRGB(0,255,150)
+title.BackgroundTransparency = 1
+
+local function Button(text, key, y)
+    local b = Instance.new("TextButton", main)
+    b.Size = UDim2.new(1,-20,0,35)
+    b.Position = UDim2.new(0,10,0,y)
+    b.Text = text.." [OFF]"
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 12
+    b.BackgroundColor3 = Color3.fromRGB(40,40,50)
+    Instance.new("UICorner", b)
+
+    b.MouseButton1Click:Connect(function()
+        Config.Active[key] = not Config.Active[key]
+        b.Text = text .. (Config.Active[key] and " [ON]" or " [OFF]")
+        b.BackgroundColor3 = Config.Active[key] and Color3.fromRGB(0,255,150) or Color3.fromRGB(40,40,50)
+    end)
+end
+
+Button("👻 Atravessar ate a alma(não ative)", "NoClip", 50)
+Button("⚽ Condução de peteca", "BallControl", 90)
+Button("🧍‍♂️ Atravessar theus", "BallControl", 130)
+Button("🔫 Van dijk", "Disarm", 170)
+Button("🚀 No Lag", "AntiLag", 210)
+Button("💥 chute power", "BigKick", 250)
+Button("⏱ Tempo de Reação", "Reaction", 290)
+
+print("🫂 Hunk Painel Hub carregado com sucesso!")
